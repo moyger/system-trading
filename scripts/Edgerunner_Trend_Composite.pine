@@ -108,3 +108,12 @@ alertcondition(ta.crossover(trendComposite, 3), title="Strong Bullish Signal", m
 alertcondition(ta.crossunder(trendComposite, -3), title="Strong Bearish Signal", message="Trend Composite crossed below -3")
 alertcondition(ta.crossover(trendComposite, 0), title="Bullish Crossover", message="Trend Composite turned positive")
 alertcondition(ta.crossunder(trendComposite, 0), title="Bearish Crossover", message="Trend Composite turned negative")
+
+// Bybit Webhook Alerts (copy these messages for TradingView alerts)
+// Strong Buy Signal (TC > 3): {"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":{{plot("Trend Composite")}},"symbol":"BTCUSDT","action":"buy","timestamp":"{{time}}","price":"{{close}}"}
+// Strong Sell Signal (TC < -3): {"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":{{plot("Trend Composite")}},"symbol":"BTCUSDT","action":"sell","timestamp":"{{time}}","price":"{{close}}"}
+// Neutral Signal (TC = 0): {"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":{{plot("Trend Composite")}},"symbol":"BTCUSDT","action":"close","timestamp":"{{time}}","price":"{{close}}"}
+
+alertcondition(ta.crossover(trendComposite, 3), title="Bybit Long Entry", message='{"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":' + str.tostring(trendComposite) + ',"symbol":"BTCUSDT","action":"buy","timestamp":"' + str.tostring(time) + '","price":"' + str.tostring(close) + '"}')
+alertcondition(ta.crossunder(trendComposite, -3), title="Bybit Short Entry", message='{"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":' + str.tostring(trendComposite) + ',"symbol":"BTCUSDT","action":"sell","timestamp":"' + str.tostring(time) + '","price":"' + str.tostring(close) + '"}')
+alertcondition(ta.crossover(trendComposite, 0) or ta.crossunder(trendComposite, 0), title="Bybit Close Positions", message='{"token":"k9P$Xz83!vW@b12N#rTe","trendComposite":' + str.tostring(trendComposite) + ',"symbol":"BTCUSDT","action":"close","timestamp":"' + str.tostring(time) + '","price":"' + str.tostring(close) + '"}')

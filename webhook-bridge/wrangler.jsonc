@@ -1,0 +1,32 @@
+{
+	"name": "tradingview-webhook",
+	"main": "src/index.js",
+	"compatibility_date": "2025-08-09",
+	"compatibility_flags": ["nodejs_compat"],
+  
+	// Key-Value store (optional, if you want to queue messages)
+	"kv_namespaces": [
+	  {
+		"binding": "QUEUE",
+		"id": "a43aa907cacb4e5ba1ff7353b5112f90",
+		"preview_id": "a43aa907cacb4e5ba1ff7353b5112f90"
+	  }
+	],
+  
+	// Environment variables
+	"vars": {
+	  "WEBHOOK_SECRET": "k9P$Xz83!vW@b12N#rTe",
+	  "BYBIT_TESTNET": "false",
+	  "MAX_RISK_PER_TRADE": "2.0",
+	  "MAX_DAILY_LOSS": "10",
+	  "ALLOWED_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT,ADAUSDT,DOTUSDT"
+	}
+	
+	// Note: Add these secrets using 'wrangler secret put' command:
+	// wrangler secret put BYBIT_API_KEY
+	// wrangler secret put BYBIT_API_SECRET
+  }
+  
+
+
+  

@@ -1,0 +1,115 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner StochClose [Timeframe Adaptive]", shorttitle="ER-SC", overlay=false)
+
+// Indicator Mode Selection
+mode = input.string("Trend Following", "Indicator Mode", options=["Trend Following", "Mean Reversion"])
+
+// Timeframe Adaptation Settings
+timeframeMultiplier = input.float(1.0, "Timeframe Multiplier", minval=0.1, maxval=10, step=0.1, tooltip="Adjust for different timeframes: 0.2 for 1H (daily/6), 1.0 for Daily, 5 for Weekly")
+
+// Base periods for different modes
+baseTrendPeriod = 125  // ~6 months for daily
+baseMeanRevPeriod = 14  // 14 days for mean reversion
+
+// Trend Following Settings
+trendPeriod = math.round(baseTrendPeriod * timeframeMultiplier)
+trendSmoothing = input.int(5, "Trend Smoothing (%K)", minval=1, group="Trend Following")
+trendSignalLine = input.int(1, "Trend Signal Line (%D)", minval=1, group="Trend Following")
+trendBullThreshold = input.float(60, "Bull Threshold", minval=0, maxval=100, group="Trend Following")
+trendBearThreshold = input.float(40, "Bear Threshold", minval=0, maxval=100, group="Trend Following")
+
+// Mean Reversion Settings
+meanRevPeriod = math.round(baseMeanRevPeriod * timeframeMultiplier)
+meanRevSmoothing = input.int(3, "Mean Rev Smoothing (%K)", minval=1, group="Mean Reversion")
+meanRevSignalLine = input.int(3, "Mean Rev Signal Line (%D)", minval=1, group="Mean Reversion")
+meanRevOverbought = input.float(95, "Overbought Level", minval=0, maxval=100, group="Mean Reversion")
+meanRevOversold = input.float(5, "Oversold Level", minval=0, maxval=100, group="Mean Reversion")
+
+// Select parameters based on mode
+period = mode == "Trend Following" ? trendPeriod : meanRevPeriod
+smoothing = mode == "Trend Following" ? trendSmoothing : meanRevSmoothing
+signalLine = mode == "Trend Following" ? trendSignalLine : meanRevSignalLine
+
+// Calculate StochClose (based on closing prices only)
+lowestClose = ta.lowest(close, period)
+highestClose = ta.highest(close, period)
+stochCloseRaw = highestClose != lowestClose ? (close - lowestClose) / (highestClose - lowestClose) * 100 : 50
+
+// Apply smoothing (%K)
+stochClose = ta.sma(stochCloseRaw, smoothing)
+
+// Calculate signal line (%D)
+stochSignal = ta.sma(stochClose, signalLine)
+
+// Determine colors based on mode
+stochColor = if mode == "Trend Following"
+    stochClose > trendBullThreshold ? color.green : stochClose < trendBearThreshold ? color.red : color.gray
+else
+    stochClose > meanRevOverbought ? color.red : stochClose < meanRevOversold ? color.green : color.gray
+
+// Plot main indicator with TIP styling - blue line like original
+p_stoch = plot(stochClose, title="StochClose", color=color.new(color.blue, 0), linewidth=3)
+p_signal = plot(stochSignal, title="Signal Line", color=color.new(color.orange, 30), linewidth=1)
+
+// Create plot references for threshold lines (needed for fill function)
+p_upper_threshold = plot(mode == "Trend Following" ? trendBullThreshold : meanRevOverbought, color=color.new(color.white, 100), title="Upper Threshold")
+p_lower_threshold = plot(mode == "Trend Following" ? trendBearThreshold : meanRevOversold, color=color.new(color.white, 100), title="Lower Threshold")
+
+// Plot threshold/level lines (must be at global scope)
+// Trend Following thresholds
+h1_trend = hline(60, "Bull Threshold", color=mode == "Trend Following" ? color.new(color.green, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h2_trend = hline(40, "Bear Threshold", color=mode == "Trend Following" ? color.new(color.red, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+
+// Mean Reversion thresholds  
+h1_mr = hline(95, "Overbought", color=mode == "Mean Reversion" ? color.new(color.red, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h2_mr = hline(5, "Oversold", color=mode == "Mean Reversion" ? color.new(color.green, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+
+// Common reference lines
+hline(50, "Midline", color=color.gray, linestyle=hline.style_dotted)
+hline(100, "Max", color=color.new(color.white, 80), linestyle=hline.style_solid)
+hline(0, "Min", color=color.new(color.white, 80), linestyle=hline.style_solid)
+
+// Fill areas between StochClose line and threshold lines (like TIP indicator)
+// Fill between StochClose line and upper threshold when above threshold
+upperFillColor = (mode == "Trend Following" and stochClose > trendBullThreshold) or (mode == "Mean Reversion" and stochClose > meanRevOverbought) ? color.new(mode == "Trend Following" ? color.lime : color.red, 85) : na
+fill(p_stoch, p_upper_threshold, color=upperFillColor, title="Upper Fill")
+
+// Fill between StochClose line and lower threshold when below threshold  
+lowerFillColor = (mode == "Trend Following" and stochClose < trendBearThreshold) or (mode == "Mean Reversion" and stochClose < meanRevOversold) ? color.new(mode == "Trend Following" ? color.red : color.lime, 85) : na
+fill(p_stoch, p_lower_threshold, color=lowerFillColor, title="Lower Fill")
+
+// Information table
+var table infoTable = table.new(position.top_right, 2, 4, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Mode:", text_color=color.white)
+    table.cell(infoTable, 1, 0, mode, text_color=color.yellow)
+    table.cell(infoTable, 0, 1, "Period:", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(period), text_color=color.white)
+    table.cell(infoTable, 0, 2, "StochClose:", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(stochClose, "#.##"), text_color=stochColor)
+    table.cell(infoTable, 0, 3, "Signal:", text_color=color.white)
+    
+    signalText = if mode == "Trend Following"
+        stochClose > trendBullThreshold ? "BULLISH" : stochClose < trendBearThreshold ? "BEARISH" : "NEUTRAL"
+    else
+        stochClose > meanRevOverbought ? "OVERBOUGHT" : stochClose < meanRevOversold ? "OVERSOLD" : "NEUTRAL"
+    
+    signalColor = if mode == "Trend Following"
+        stochClose > trendBullThreshold ? color.green : stochClose < trendBearThreshold ? color.red : color.gray
+    else
+        stochClose > meanRevOverbought ? color.red : stochClose < meanRevOversold ? color.green : color.gray
+    
+    table.cell(infoTable, 1, 3, signalText, text_color=signalColor)
+
+// Alerts for Trend Following mode
+alertcondition(mode == "Trend Following" and ta.crossover(stochClose, trendBullThreshold), title="Bullish Signal", message="StochClose crossed above bull threshold")
+alertcondition(mode == "Trend Following" and ta.crossunder(stochClose, trendBearThreshold), title="Bearish Signal", message="StochClose crossed below bear threshold")
+
+// Alerts for Mean Reversion mode
+alertcondition(mode == "Mean Reversion" and ta.crossover(stochClose, meanRevOverbought), title="Overbought Signal", message="StochClose entered overbought zone")
+alertcondition(mode == "Mean Reversion" and ta.crossunder(stochClose, meanRevOversold), title="Oversold Signal", message="StochClose entered oversold zone")
+alertcondition(mode == "Mean Reversion" and ta.crossunder(stochClose, meanRevOverbought), title="Exit Overbought", message="StochClose exited overbought zone")
+alertcondition(mode == "Mean Reversion" and ta.crossover(stochClose, meanRevOversold), title="Exit Oversold", message="StochClose exited oversold zone")

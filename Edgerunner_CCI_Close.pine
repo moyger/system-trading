@@ -1,0 +1,135 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner CCI Close [Timeframe Adaptive]", shorttitle="ER-CCI", overlay=false)
+
+// Mode Selection
+mode = input.string("Trend Following", "Indicator Mode", options=["Trend Following", "Mean Reversion"])
+
+// Timeframe Adaptation Settings
+timeframeMultiplier = input.float(1.0, "Timeframe Multiplier", minval=0.1, maxval=10, step=0.1, tooltip="Adjust for different timeframes: 0.2 for 1H (daily/6), 1.0 for Daily, 5 for Weekly")
+
+// Base periods for different modes
+baseTrendPeriod = 125  // ~6 months for daily (trend following)
+baseMeanRevPeriod = 20  // 20 days for mean reversion
+
+// Select period based on mode
+basePeriod = mode == "Trend Following" ? baseTrendPeriod : baseMeanRevPeriod
+cciPeriod = math.round(basePeriod * timeframeMultiplier)
+
+// Trend Following Thresholds
+trendBullThreshold = input.float(100, "Bull Threshold", group="Trend Following")
+trendBearThreshold = input.float(-100, "Bear Threshold", group="Trend Following")
+
+// Mean Reversion Thresholds
+meanRevOverbought = input.float(200, "Overbought Level", group="Mean Reversion")
+meanRevOversold = input.float(-200, "Oversold Level", group="Mean Reversion")
+
+// Debug Constant for testing different CCI calculation constants
+debugConstant = input.float(0.015, "Debug Constant", step=0.001, group="Debug", tooltip="Adjust this to match TIP CCI values. Try 0.010, 0.008, or 0.005 for larger values")
+
+// CCI Close Calculation - TradingView Default Method
+// Uses Close price with standard deviation (ta.dev) instead of mean absolute deviation
+// This matches the TradingView default CCI calculation exactly
+
+src = close
+ma = ta.sma(src, cciPeriod)
+cciClose = (src - ma) / (0.015 * ta.dev(src, cciPeriod))
+
+// Smoothing option
+smoothing = input.int(1, "Smoothing Period", minval=1, maxval=10)
+smoothedCCI = ta.sma(cciClose, smoothing)
+
+// Determine signal based on mode
+signal = if mode == "Trend Following"
+    smoothedCCI > trendBullThreshold ? 1 : smoothedCCI < trendBearThreshold ? -1 : 0
+else
+    smoothedCCI > meanRevOverbought ? 1 : smoothedCCI < meanRevOversold ? -1 : 0
+
+// Color based on mode and signal
+cciColor = if mode == "Trend Following"
+    signal == 1 ? color.green : signal == -1 ? color.red : smoothedCCI > 0 ? color.new(color.green, 50) : smoothedCCI < 0 ? color.new(color.red, 50) : color.gray
+else
+    smoothedCCI > meanRevOverbought ? color.red : smoothedCCI < meanRevOversold ? color.green : smoothedCCI > 100 ? color.new(color.red, 50) : smoothedCCI < -100 ? color.new(color.green, 50) : color.gray
+
+// Plot CCI Close
+plot(smoothedCCI, title="CCI Close", color=cciColor, linewidth=2)
+
+// Plot threshold lines (must be at global scope with conditional coloring)
+// Trend Following thresholds
+h1_tf = hline(100, "Bull Threshold", color=mode == "Trend Following" ? color.new(color.green, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h2_tf = hline(-100, "Bear Threshold", color=mode == "Trend Following" ? color.new(color.red, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+
+// Mean Reversion thresholds
+h1_mr = hline(200, "Overbought", color=mode == "Mean Reversion" ? color.new(color.red, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h2_mr = hline(-200, "Oversold", color=mode == "Mean Reversion" ? color.new(color.green, 50) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h3_mr = hline(100, "Mild Overbought", color=mode == "Mean Reversion" ? color.new(color.red, 70) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+h4_mr = hline(-100, "Mild Oversold", color=mode == "Mean Reversion" ? color.new(color.green, 70) : color.new(color.gray, 90), linestyle=hline.style_dotted)
+
+// Common reference lines
+hline(0, "Zero Line", color=color.gray, linestyle=hline.style_solid)
+hline(300, "Extreme High", color=color.new(color.white, 80), linestyle=hline.style_solid)
+hline(-300, "Extreme Low", color=color.new(color.white, 80), linestyle=hline.style_solid)
+
+// Fill areas based on mode
+fill(h1_tf, h2_tf, color=mode == "Trend Following" ? color.new(color.gray, 95) : na, title="TF Neutral Zone")
+fill(h1_mr, h2_mr, color=mode == "Mean Reversion" ? color.new(color.gray, 95) : na, title="MR Neutral Zone")
+
+// Background coloring based on signals
+bgcolor(mode == "Trend Following" and signal == 1 ? color.new(color.green, 95) : na, title="Bullish Background")
+bgcolor(mode == "Trend Following" and signal == -1 ? color.new(color.red, 95) : na, title="Bearish Background")
+bgcolor(mode == "Mean Reversion" and smoothedCCI > meanRevOverbought ? color.new(color.red, 95) : na, title="Overbought Background")
+bgcolor(mode == "Mean Reversion" and smoothedCCI < meanRevOversold ? color.new(color.green, 95) : na, title="Oversold Background")
+
+// Divergence Detection
+lookback = input.int(20, "Divergence Lookback", minval=5, maxval=50, group="Divergence")
+showDivergence = input.bool(false, "Show Divergences", group="Divergence")
+
+// Bullish divergence
+priceLow = ta.lowest(low, lookback)
+cciLow = ta.lowest(smoothedCCI, lookback)
+bullishDiv = showDivergence and (low == priceLow and low < low[lookback]) and (smoothedCCI == cciLow and smoothedCCI > smoothedCCI[lookback])
+
+// Bearish divergence
+priceHigh = ta.highest(high, lookback)
+cciHigh = ta.highest(smoothedCCI, lookback)
+bearishDiv = showDivergence and (high == priceHigh and high > high[lookback]) and (smoothedCCI == cciHigh and smoothedCCI < smoothedCCI[lookback])
+
+plotshape(bullishDiv, title="Bullish Divergence", style=shape.triangleup, location=location.bottom, color=color.green, size=size.small)
+plotshape(bearishDiv, title="Bearish Divergence", style=shape.triangledown, location=location.top, color=color.red, size=size.small)
+
+// Information table
+var table infoTable = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Mode:", text_color=color.white)
+    table.cell(infoTable, 1, 0, mode, text_color=color.yellow)
+    table.cell(infoTable, 0, 1, "Period:", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(cciPeriod), text_color=color.white)
+    table.cell(infoTable, 0, 2, "CCI Close:", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(smoothedCCI, "#.#"), text_color=cciColor)
+    table.cell(infoTable, 0, 3, "Raw CCI:", text_color=color.white)
+    table.cell(infoTable, 1, 3, str.tostring(cciClose, "#.#"), text_color=color.gray)
+    table.cell(infoTable, 0, 4, "Signal:", text_color=color.white)
+    
+    signalText = if mode == "Trend Following"
+        signal == 1 ? "BULLISH" : signal == -1 ? "BEARISH" : "NEUTRAL"
+    else
+        smoothedCCI > meanRevOverbought ? "OVERBOUGHT" : smoothedCCI < meanRevOversold ? "OVERSOLD" : smoothedCCI > 100 ? "MILD OB" : smoothedCCI < -100 ? "MILD OS" : "NEUTRAL"
+    
+    signalColor = if mode == "Trend Following"
+        signal == 1 ? color.green : signal == -1 ? color.red : color.gray
+    else
+        smoothedCCI > meanRevOverbought ? color.red : smoothedCCI < meanRevOversold ? color.green : smoothedCCI > 100 ? color.new(color.red, 50) : smoothedCCI < -100 ? color.new(color.green, 50) : color.gray
+    
+    table.cell(infoTable, 1, 4, signalText, text_color=signalColor)
+
+// Alerts for Trend Following
+alertcondition(mode == "Trend Following" and ta.crossover(smoothedCCI, trendBullThreshold), title="Bullish Signal", message="CCI Close crossed above bull threshold")
+alertcondition(mode == "Trend Following" and ta.crossunder(smoothedCCI, trendBearThreshold), title="Bearish Signal", message="CCI Close crossed below bear threshold")
+
+// Alerts for Mean Reversion
+alertcondition(mode == "Mean Reversion" and ta.crossover(smoothedCCI, meanRevOverbought), title="Overbought Signal", message="CCI Close entered overbought zone")
+alertcondition(mode == "Mean Reversion" and ta.crossunder(smoothedCCI, meanRevOversold), title="Oversold Signal", message="CCI Close entered oversold zone")
+alertcondition(mode == "Mean Reversion" and ta.crossunder(smoothedCCI, meanRevOverbought), title="Exit Overbought", message="CCI Close exited overbought zone")
+alertcondition(mode == "Mean Reversion" and ta.crossover(smoothedCCI, meanRevOversold), title="Exit Oversold", message="CCI Close exited oversold zone")

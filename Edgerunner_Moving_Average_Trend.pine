@@ -1,0 +1,91 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner Moving Average Trend [Timeframe Adaptive]", shorttitle="ER-MAT", overlay=false)
+
+// Timeframe Adaptation Settings
+timeframeMultiplier = input.float(1.0, "Timeframe Multiplier", minval=0.1, maxval=10, step=0.1, tooltip="Adjust for different timeframes: 0.2 for 1H (daily/6), 1.0 for Daily, 5 for Weekly")
+
+// Base period (optimized for daily)
+baseMAPeriod = 125  // ~6 months for daily
+
+// Adjusted period based on timeframe
+maPeriod = math.round(baseMAPeriod * timeframeMultiplier)
+
+// Moving Average Settings
+maType = input.string("SMA", "Moving Average Type", options=["SMA", "EMA", "WMA", "HMA"])
+rocPeriod = input.int(5, "ROC Period", minval=1)
+upperRef = input.float(0.3, "Upper Reference (%)", step=0.1, tooltip="Bullish signal threshold - set higher to reduce whipsaws")
+lowerRef = input.float(-0.3, "Lower Reference (%)", step=0.1, tooltip="Bearish signal threshold - set lower to reduce whipsaws")
+
+// Calculate Moving Average based on type
+ma = switch maType
+    "SMA" => ta.sma(close, maPeriod)
+    "EMA" => ta.ema(close, maPeriod)
+    "WMA" => ta.wma(close, maPeriod)
+    "HMA" => ta.hma(close, maPeriod)
+
+// Calculate Rate of Change of MA
+maROC = (ma - ma[rocPeriod]) / ma[rocPeriod] * 100
+
+// Determine trend signal
+trendSignal = maROC > upperRef ? 1 : maROC < lowerRef ? -1 : 0
+
+// Histogram colors matching TIP indicator style
+histogramColor = maROC > 0 ? color.new(color.green, 20) : color.new(color.red, 20)
+
+// Color for information table
+maColor = maROC > 0 ? color.green : color.red
+
+// Main histogram visualization (columns style like TIP indicator)
+plot(maROC, title="MA Trend Histogram", color=histogramColor, style=plot.style_columns, linewidth=3)
+
+// Create zero baseline and value line for fill effect
+zeroBaseline = plot(0, color=color.new(color.gray, 100), title="Zero Baseline")
+maROCLine = plot(maROC, color=color.new(color.white, 100), title="MA ROC Line")
+
+// Fill between zero and values to create solid histogram appearance
+fill(zeroBaseline, maROCLine, color=maROC > 0 ? color.new(color.green, 70) : color.new(color.red, 70), title="Histogram Fill")
+
+// Plot reference lines
+hline(upperRef, "Upper Reference", color=color.new(color.green, 50), linestyle=hline.style_dotted)
+hline(0, "Zero Line", color=color.gray, linestyle=hline.style_solid)
+hline(lowerRef, "Lower Reference", color=color.new(color.red, 50), linestyle=hline.style_dotted)
+
+// Additional reference lines for extreme values
+hline(1, "Strong Up", color=color.new(color.green, 70), linestyle=hline.style_dotted)
+hline(-1, "Strong Down", color=color.new(color.red, 70), linestyle=hline.style_dotted)
+
+// Background coloring for signals
+bgcolor(trendSignal == 1 ? color.new(color.green, 95) : na, title="Bullish Background")
+bgcolor(trendSignal == -1 ? color.new(color.red, 95) : na, title="Bearish Background")
+
+// Plot MA on price chart (optional)
+showMA = input.bool(false, "Show MA on Price Chart")
+plot(showMA ? ma : na, title="Moving Average", color=color.blue, linewidth=2, display=display.none)
+
+// Information table
+var table infoTable = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    table.cell(infoTable, 0, 0, "MA Type:", text_color=color.white)
+    table.cell(infoTable, 1, 0, maType + "(" + str.tostring(maPeriod) + ")", text_color=color.white)
+    table.cell(infoTable, 0, 1, "ROC Period:", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(rocPeriod), text_color=color.white)
+    table.cell(infoTable, 0, 2, "MA ROC:", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(maROC, "#.##") + "%", text_color=maColor)
+    table.cell(infoTable, 0, 3, "Trend:", text_color=color.white)
+    
+    trendText = trendSignal == 1 ? "UPTREND" : trendSignal == -1 ? "DOWNTREND" : maROC > 0 ? "RISING" : maROC < 0 ? "FALLING" : "FLAT"
+    table.cell(infoTable, 1, 3, trendText, text_color=maColor)
+    
+    table.cell(infoTable, 0, 4, "MA Value:", text_color=color.white)
+    table.cell(infoTable, 1, 4, str.tostring(ma, "#.##"), text_color=color.white)
+
+// Alerts
+alertcondition(ta.crossover(maROC, upperRef), title="Bullish Signal", message="MA Trend crossed above upper reference - Uptrend signal")
+alertcondition(ta.crossunder(maROC, lowerRef), title="Bearish Signal", message="MA Trend crossed below lower reference - Downtrend signal")
+alertcondition(ta.crossover(maROC, 0), title="MA Rising", message="Moving Average started rising")
+alertcondition(ta.crossunder(maROC, 0), title="MA Falling", message="Moving Average started falling")
+alertcondition(maROC > 1, title="Strong Uptrend", message="MA Trend showing strong upward momentum (>1%)")
+alertcondition(maROC < -1, title="Strong Downtrend", message="MA Trend showing strong downward momentum (<-1%)")

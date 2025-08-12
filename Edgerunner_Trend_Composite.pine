@@ -1,0 +1,110 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner Trend Composite [Timeframe Adaptive]", shorttitle="ER-TC", overlay=false)
+
+// Timeframe Adaptation Settings
+timeframeMultiplier = input.float(1.0, "Timeframe Multiplier", minval=0.1, maxval=10, step=0.1, tooltip="Adjust for different timeframes: 0.2 for 1H (daily/6), 1.0 for Daily, 5 for Weekly")
+
+// Base periods (optimized for daily)
+baseMAPeriod = 125
+baseCCIPeriod = 125
+baseBBPeriod = 125
+baseKCPeriod = 125
+baseStochPeriod = 125
+baseATRPeriod = 125
+
+// Adjusted periods based on timeframe
+maPeriod = math.round(baseMAPeriod * timeframeMultiplier)
+cciPeriod = math.round(baseCCIPeriod * timeframeMultiplier)
+bbPeriod = math.round(baseBBPeriod * timeframeMultiplier)
+kcPeriod = math.round(baseKCPeriod * timeframeMultiplier)
+stochPeriod = math.round(baseStochPeriod * timeframeMultiplier)
+atrPeriod = math.round(baseATRPeriod * timeframeMultiplier)
+
+// Component Settings
+maROCPeriod = input.int(5, "MA ROC Period", minval=1)
+maROCBullThreshold = input.float(0.0, "MA Trend Bull Threshold", step=0.1)
+maROCBearThreshold = input.float(0.0, "MA Trend Bear Threshold", step=0.1)
+
+stochSmoothing = input.int(5, "StochClose Smoothing", minval=1)
+stochBullThreshold = input.float(60, "StochClose Bull Threshold", minval=0, maxval=100)
+stochBearThreshold = input.float(40, "StochClose Bear Threshold", minval=0, maxval=100)
+
+cciBullThreshold = input.float(100, "CCI Close Bull Threshold")
+cciBearThreshold = input.float(-100, "CCI Close Bear Threshold")
+
+bbStdDev = input.float(1.0, "Bollinger Bands StdDev", minval=0.1)
+kcMultiplier = input.float(2.0, "Keltner Channels ATR Multiplier", minval=0.1)
+
+// 1. Moving Average Trend
+ma = ta.sma(close, maPeriod)
+maROC = (ma - ma[maROCPeriod]) / ma[maROCPeriod] * 100
+maTrendSignal = maROC > maROCBullThreshold ? 1 : maROC < maROCBearThreshold ? -1 : 0
+
+// 2. CCI Close (TradingView Default Method - based on closing prices only)
+src_cci = close  // Using close instead of typical price
+ma_cci = ta.sma(src_cci, cciPeriod)
+cciClose = (src_cci - ma_cci) / (0.015 * ta.dev(src_cci, cciPeriod))
+cciSignal = cciClose > cciBullThreshold ? 1 : cciClose < cciBearThreshold ? -1 : 0
+
+// 3. Bollinger Bands
+bbBasis = ta.sma(close, bbPeriod)
+bbDev = bbStdDev * ta.stdev(close, bbPeriod)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+bbSignal = close > bbUpper ? 1 : close < bbLower ? -1 : 0
+
+// 4. Keltner Channels
+kcBasis = ta.ema(close, kcPeriod)
+kcATR = ta.atr(atrPeriod)
+kcUpper = kcBasis + (kcMultiplier * kcATR)
+kcLower = kcBasis - (kcMultiplier * kcATR)
+kcSignal = close > kcUpper ? 1 : close < kcLower ? -1 : 0
+
+// 5. StochClose (Stochastic based on closing prices)
+stochCloseLowest = ta.lowest(close, stochPeriod)
+stochCloseHighest = ta.highest(close, stochPeriod)
+stochCloseRaw = stochCloseHighest != stochCloseLowest ? (close - stochCloseLowest) / (stochCloseHighest - stochCloseLowest) * 100 : 50
+stochClose = ta.sma(stochCloseRaw, stochSmoothing)
+stochSignal = stochClose > stochBullThreshold ? 1 : stochClose < stochBearThreshold ? -1 : 0
+
+// Calculate Trend Composite
+trendComposite = maTrendSignal + cciSignal + bbSignal + kcSignal + stochSignal
+
+// Plotting
+compositeColor = trendComposite > 0 ? color.green : trendComposite < 0 ? color.red : color.gray
+plot(trendComposite, title="Trend Composite", color=compositeColor, style=plot.style_columns, linewidth=2)
+
+// Reference lines
+hline(5, "Max Bullish", color=color.green, linestyle=hline.style_dotted)
+hline(3, "Strong Bullish", color=color.new(color.green, 50), linestyle=hline.style_dotted)
+hline(1, "Weak Bullish", color=color.new(color.green, 70), linestyle=hline.style_dotted)
+hline(0, "Neutral", color=color.gray)
+hline(-1, "Weak Bearish", color=color.new(color.red, 70), linestyle=hline.style_dotted)
+hline(-3, "Strong Bearish", color=color.new(color.red, 50), linestyle=hline.style_dotted)
+hline(-5, "Max Bearish", color=color.red, linestyle=hline.style_dotted)
+
+// Component breakdown table
+var table componentTable = table.new(position.top_right, 6, 2, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    table.cell(componentTable, 0, 0, "Component", text_color=color.white)
+    table.cell(componentTable, 1, 0, "MA Trend", text_color=color.white)
+    table.cell(componentTable, 2, 0, "CCI Close", text_color=color.white)
+    table.cell(componentTable, 3, 0, "BB", text_color=color.white)
+    table.cell(componentTable, 4, 0, "KC", text_color=color.white)
+    table.cell(componentTable, 5, 0, "StochClose", text_color=color.white)
+    
+    table.cell(componentTable, 0, 1, "Signal", text_color=color.white)
+    table.cell(componentTable, 1, 1, str.tostring(maTrendSignal), text_color=maTrendSignal > 0 ? color.green : maTrendSignal < 0 ? color.red : color.gray)
+    table.cell(componentTable, 2, 1, str.tostring(cciSignal), text_color=cciSignal > 0 ? color.green : cciSignal < 0 ? color.red : color.gray)
+    table.cell(componentTable, 3, 1, str.tostring(bbSignal), text_color=bbSignal > 0 ? color.green : bbSignal < 0 ? color.red : color.gray)
+    table.cell(componentTable, 4, 1, str.tostring(kcSignal), text_color=kcSignal > 0 ? color.green : kcSignal < 0 ? color.red : color.gray)
+    table.cell(componentTable, 5, 1, str.tostring(stochSignal), text_color=stochSignal > 0 ? color.green : stochSignal < 0 ? color.red : color.gray)
+
+// Alerts
+alertcondition(ta.crossover(trendComposite, 3), title="Strong Bullish Signal", message="Trend Composite crossed above +3")
+alertcondition(ta.crossunder(trendComposite, -3), title="Strong Bearish Signal", message="Trend Composite crossed below -3")
+alertcondition(ta.crossover(trendComposite, 0), title="Bullish Crossover", message="Trend Composite turned positive")
+alertcondition(ta.crossunder(trendComposite, 0), title="Bearish Crossover", message="Trend Composite turned negative")

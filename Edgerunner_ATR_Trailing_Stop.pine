@@ -1,0 +1,189 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner ATR Trailing Stop", shorttitle="ER-ATR-TS", overlay=true)
+
+// Input Settings
+atrPeriods = input.int(22, "ATR Periods", minval=1, tooltip="Number of periods for ATR calculation (default: 22)")
+atrMultiplier = input.float(3.0, "ATR Multiplier", minval=0.1, step=0.1, tooltip="Multiplier for ATR distance (1=tight, 5=wide)")
+calcSource = input.string("Close", "Calculate From", options=["High", "Low", "Close", "HL2", "HLC3", "OHLC4"], tooltip="Price source for stop calculation")
+triggerSource = input.string("Close", "Trigger Price", options=["High", "Low", "Close", "HL2", "HLC3", "OHLC4"], tooltip="Price source for stop trigger")
+displayMode = input.string("SAR", "Display Mode", options=["SAR", "Long Only", "Short Only"], tooltip="SAR shows both long and short stops")
+
+// Trend Direction Input
+trendSource = input.string("Price Action", "Trend Direction Source", options=["Price Action", "External Indicator"], tooltip="How to determine trend direction")
+extIndicatorValue = input.source(close, "External Indicator", tooltip="External indicator for trend direction (>0 = Long, <0 = Short)")
+
+// Alert Settings
+enableAlerts = input.bool(true, "Enable Alerts", group="Alerts")
+
+// Calculate source prices
+getPrice(source) =>
+    switch source
+        "High" => high
+        "Low" => low
+        "Close" => close
+        "HL2" => hl2
+        "HLC3" => hlc3
+        "OHLC4" => ohlc4
+        => close
+
+calcPrice = getPrice(calcSource)
+trigPrice = getPrice(triggerSource)
+
+// ATR Calculation
+atr = ta.atr(atrPeriods)
+
+// State variables for SAR mode
+var float stopLong = na
+var float stopShort = na
+var bool isLong = true
+var float highestSinceLong = na
+var float lowestSinceShort = na
+var float atrAtHighest = na
+var float atrAtLowest = na
+
+// Determine trend based on source
+trendSignal = trendSource == "External Indicator" ? extIndicatorValue : 0
+
+// SAR Mode Logic
+if displayMode == "SAR"
+    // Initialize on first bar
+    if na(stopLong) and na(stopShort)
+        isLong := close > ta.sma(close, 50)
+        if isLong
+            highestSinceLong := calcPrice
+            atrAtHighest := atr
+            stopLong := highestSinceLong - (atrMultiplier * atrAtHighest)
+        else
+            lowestSinceShort := calcPrice
+            atrAtLowest := atr
+            stopShort := lowestSinceShort + (atrMultiplier * atrAtLowest)
+    
+    // Update stops based on current position
+    if isLong
+        // Update highest and ATR if new high
+        if calcPrice > highestSinceLong
+            highestSinceLong := calcPrice
+            atrAtHighest := atr
+        
+        // Calculate and update long stop
+        newStopLong = highestSinceLong - (atrMultiplier * atrAtHighest)
+        stopLong := math.max(stopLong, newStopLong)
+        
+        // Check if stop triggered
+        if trigPrice <= stopLong
+            isLong := false
+            lowestSinceShort := calcPrice
+            atrAtLowest := atr
+            stopShort := lowestSinceShort + (atrMultiplier * atrAtLowest)
+            stopLong := na
+    else
+        // Update lowest and ATR if new low
+        if calcPrice < lowestSinceShort
+            lowestSinceShort := calcPrice
+            atrAtLowest := atr
+        
+        // Calculate and update short stop
+        newStopShort = lowestSinceShort + (atrMultiplier * atrAtLowest)
+        stopShort := math.min(stopShort, newStopShort)
+        
+        // Check if stop triggered
+        if trigPrice >= stopShort
+            isLong := true
+            highestSinceLong := calcPrice
+            atrAtHighest := atr
+            stopLong := highestSinceLong - (atrMultiplier * atrAtHighest)
+            stopShort := na
+
+// Long Only Mode
+else if displayMode == "Long Only"
+    // Use external indicator or price action to determine if in long position
+    inLongPosition = trendSource == "External Indicator" ? trendSignal > 0 : close > ta.sma(close, 50)
+    
+    if inLongPosition
+        if na(highestSinceLong)
+            highestSinceLong := calcPrice
+            atrAtHighest := atr
+        
+        if calcPrice > highestSinceLong
+            highestSinceLong := calcPrice
+            atrAtHighest := atr
+        
+        newStopLong = highestSinceLong - (atrMultiplier * atrAtHighest)
+        stopLong := na(stopLong) ? newStopLong : math.max(stopLong, newStopLong)
+    else
+        stopLong := na
+        highestSinceLong := na
+        atrAtHighest := na
+
+// Short Only Mode
+else if displayMode == "Short Only"
+    // Use external indicator or price action to determine if in short position
+    inShortPosition = trendSource == "External Indicator" ? trendSignal < 0 : close < ta.sma(close, 50)
+    
+    if inShortPosition
+        if na(lowestSinceShort)
+            lowestSinceShort := calcPrice
+            atrAtLowest := atr
+        
+        if calcPrice < lowestSinceShort
+            lowestSinceShort := calcPrice
+            atrAtLowest := atr
+        
+        newStopShort = lowestSinceShort + (atrMultiplier * atrAtLowest)
+        stopShort := na(stopShort) ? newStopShort : math.min(stopShort, newStopShort)
+    else
+        stopShort := na
+        lowestSinceShort := na
+        atrAtLowest := na
+
+// Plotting
+longStopColor = color.new(color.green, 0)
+shortStopColor = color.new(color.red, 0)
+
+plot(stopLong, title="ATR Stop Long", color=longStopColor, style=plot.style_circles, linewidth=2)
+plot(stopShort, title="ATR Stop Short", color=shortStopColor, style=plot.style_circles, linewidth=2)
+
+// Plot current stop line for SAR mode
+currentStop = displayMode == "SAR" ? (isLong ? stopLong : stopShort) : na
+currentColor = displayMode == "SAR" ? (isLong ? longStopColor : shortStopColor) : na
+plot(currentStop, title="Current ATR Stop", color=currentColor, style=plot.style_line, linewidth=3)
+
+// Alert Conditions
+// SAR Mode Alerts
+longEntry = enableAlerts and displayMode == "SAR" and isLong and not isLong[1]
+shortEntry = enableAlerts and displayMode == "SAR" and not isLong and isLong[1]
+
+alertcondition(longEntry, title="ATR Stop - Long Entry", message="ATR Trailing Stop flipped to long position")
+alertcondition(shortEntry, title="ATR Stop - Short Entry", message="ATR Trailing Stop flipped to short position")
+
+// Long/Short specific alerts
+longStopHit = enableAlerts and not na(stopLong) and trigPrice <= stopLong
+shortStopHit = enableAlerts and not na(stopShort) and trigPrice >= stopShort
+
+alertcondition(longStopHit, title="ATR Stop - Long Exit", message="Price crossed below ATR trailing stop - Long position stopped out")
+alertcondition(shortStopHit, title="ATR Stop - Short Exit", message="Price crossed above ATR trailing stop - Short position stopped out")
+
+// Info Table
+var table infoTable = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 90))
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Mode:", text_color=color.white)
+    table.cell(infoTable, 1, 0, displayMode, text_color=color.yellow)
+    
+    table.cell(infoTable, 0, 1, "ATR Period:", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(atrPeriods), text_color=color.white)
+    
+    table.cell(infoTable, 0, 2, "Multiplier:", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(atrMultiplier), text_color=color.white)
+    
+    table.cell(infoTable, 0, 3, "Position:", text_color=color.white)
+    positionText = displayMode == "SAR" ? (isLong ? "LONG" : "SHORT") : displayMode == "Long Only" ? (not na(stopLong) ? "LONG" : "NONE") : (not na(stopShort) ? "SHORT" : "NONE")
+    positionColor = displayMode == "SAR" ? (isLong ? color.green : color.red) : displayMode == "Long Only" ? (not na(stopLong) ? color.green : color.gray) : (not na(stopShort) ? color.red : color.gray)
+    table.cell(infoTable, 1, 3, positionText, text_color=positionColor)
+    
+    table.cell(infoTable, 0, 4, "Stop Level:", text_color=color.white)
+    stopLevel = displayMode == "SAR" ? (isLong ? stopLong : stopShort) : displayMode == "Long Only" ? stopLong : stopShort
+    table.cell(infoTable, 1, 4, na(stopLevel) ? "N/A" : str.tostring(stopLevel, "#.##"), text_color=color.white)

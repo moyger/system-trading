@@ -1,0 +1,127 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Edgerunner Trading System
+
+//@version=6
+indicator("Edgerunner High Low Range Percent [Timeframe Adaptive]", shorttitle="ER-HLRP", overlay=false)
+
+// Timeframe Adaptation Settings
+timeframeMultiplier = input.float(1.0, "Timeframe Multiplier", minval=0.1, maxval=10, step=0.1, tooltip="Adjust for different timeframes: 0.2 for 1H (daily/6), 1.0 for Daily, 5 for Weekly")
+
+// Base smoothing period (optimized for daily)
+baseSmoothingPeriod = 10
+
+// Adjusted period based on timeframe
+smoothingPeriod = math.round(baseSmoothingPeriod * timeframeMultiplier)
+
+// Settings
+customSmoothing = input.int(10, "Smoothing Period", minval=1, maxval=50, tooltip="Set to 1 to see daily values, higher for smoothed average")
+referenceLevel = input.float(1.0, "Reference Level (%)", minval=0.1, maxval=5, step=0.1, tooltip="Threshold for high/low volatility")
+signalLine = input.int(10, "Signal Line Period", minval=1, maxval=50)
+
+// Use custom smoothing if different from default
+smoothing = customSmoothing != 10 ? customSmoothing : smoothingPeriod
+
+// Calculate High Low Range Percent
+hlRange = high - low
+hlRangePercent = (hlRange / close) * 100
+
+// Apply smoothing
+smoothedHLRP = ta.sma(hlRangePercent, smoothing)
+
+// Calculate signal line
+signal = ta.sma(smoothedHLRP, signalLine)
+
+// Determine volatility state
+volatilityState = smoothedHLRP > referenceLevel ? 1 : -1  // 1 = high volatility, -1 = low volatility
+
+// Colors (inverse relationship with price)
+// High volatility (red) is generally negative for price
+// Low volatility (green) is generally positive for price
+hlrpColor = volatilityState == 1 ? color.red : color.green
+
+// Plot High Low Range Percent
+plot(smoothedHLRP, title="HL Range %", color=hlrpColor, linewidth=2)
+plot(signal, title="Signal Line", color=color.orange, linewidth=1)
+
+// Plot histogram
+histogram = smoothedHLRP - referenceLevel
+histColor = histogram > 0 ? color.new(color.red, 70) : color.new(color.green, 70)
+plot(histogram, title="Histogram", style=plot.style_histogram, color=histColor)
+
+// Reference lines
+hline(referenceLevel, "Reference Level", color=color.gray, linestyle=hline.style_solid)
+hline(0.5, "Low Volatility", color=color.new(color.green, 70), linestyle=hline.style_dotted)
+hline(2, "High Volatility", color=color.new(color.red, 70), linestyle=hline.style_dotted)
+hline(3, "Extreme Volatility", color=color.new(color.red, 50), linestyle=hline.style_dotted)
+
+// Background coloring
+bgcolor(volatilityState == 1 ? color.new(color.red, 95) : na, title="High Volatility Background")
+bgcolor(volatilityState == -1 ? color.new(color.green, 95) : na, title="Low Volatility Background")
+
+// Narrow Range Detection (potential reversal setup)
+lookback = input.int(20, "NR Lookback Period", minval=5, maxval=50, group="Narrow Range")
+showNR = input.bool(true, "Show Narrow Range Days", group="Narrow Range")
+
+// Identify narrow range days
+lowestRange = ta.lowest(smoothedHLRP, lookback)
+isNarrowRange = showNR and smoothedHLRP == lowestRange and smoothedHLRP < 0.5
+
+plotshape(isNarrowRange, title="Narrow Range Day", style=shape.diamond, 
+    location=location.bottom, color=color.yellow, size=size.small)
+
+// Volatility Expansion/Contraction
+volExpanding = smoothedHLRP > signal and ta.rising(smoothedHLRP, 3)
+volContracting = smoothedHLRP < signal and ta.falling(smoothedHLRP, 3)
+
+// Plot volatility trend arrows
+plotshape(volExpanding and volExpanding != volExpanding[1], 
+    title="Volatility Expanding", style=shape.triangleup, 
+    location=location.top, color=color.red, size=size.tiny)
+plotshape(volContracting and volContracting != volContracting[1], 
+    title="Volatility Contracting", style=shape.triangledown, 
+    location=location.bottom, color=color.green, size=size.tiny)
+
+// Calculate statistics
+avgVolatility = ta.sma(smoothedHLRP, 50)
+stdVolatility = ta.stdev(smoothedHLRP, 50)
+zScore = stdVolatility != 0 ? (smoothedHLRP - avgVolatility) / stdVolatility : 0
+
+// Information table
+var table infoTable = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 90))
+if barstate.islast
+    table.cell(infoTable, 0, 0, "Smoothing:", text_color=color.white)
+    table.cell(infoTable, 1, 0, str.tostring(smoothing), text_color=color.white)
+    table.cell(infoTable, 0, 1, "Current:", text_color=color.white)
+    table.cell(infoTable, 1, 1, str.tostring(smoothedHLRP, "#.##") + "%", text_color=hlrpColor)
+    table.cell(infoTable, 0, 2, "Daily:", text_color=color.white)
+    table.cell(infoTable, 1, 2, str.tostring(hlRangePercent, "#.##") + "%", text_color=color.gray)
+    table.cell(infoTable, 0, 3, "Volatility:", text_color=color.white)
+    
+    volText = volatilityState == 1 ? "HIGH" : "LOW"
+    table.cell(infoTable, 1, 3, volText, text_color=hlrpColor)
+    
+    table.cell(infoTable, 0, 4, "50-Day Avg:", text_color=color.white)
+    table.cell(infoTable, 1, 4, str.tostring(avgVolatility, "#.##") + "%", text_color=color.white)
+    
+    table.cell(infoTable, 0, 5, "Z-Score:", text_color=color.white)
+    zColor = zScore > 2 ? color.red : zScore < -2 ? color.green : color.gray
+    table.cell(infoTable, 1, 5, str.tostring(zScore, "#.##"), text_color=zColor)
+    
+    table.cell(infoTable, 0, 6, "Trend:", text_color=color.white)
+    trendText = volExpanding ? "EXPANDING" : volContracting ? "CONTRACTING" : "NEUTRAL"
+    trendColor = volExpanding ? color.red : volContracting ? color.green : color.gray
+    table.cell(infoTable, 1, 6, trendText, text_color=trendColor)
+
+// Alerts
+alertcondition(ta.crossover(smoothedHLRP, referenceLevel), 
+    title="Volatility Rising", message="HL Range % crossed above reference level - Volatility increasing")
+alertcondition(ta.crossunder(smoothedHLRP, referenceLevel), 
+    title="Volatility Falling", message="HL Range % crossed below reference level - Volatility decreasing")
+alertcondition(isNarrowRange, 
+    title="Narrow Range Day", message="Narrow range day detected - Potential reversal setup")
+alertcondition(smoothedHLRP > 3, 
+    title="Extreme Volatility", message="HL Range % above 3% - Extreme volatility")
+alertcondition(volExpanding, 
+    title="Volatility Expansion", message="Volatility is expanding")
+alertcondition(volContracting, 
+    title="Volatility Contraction", message="Volatility is contracting")
